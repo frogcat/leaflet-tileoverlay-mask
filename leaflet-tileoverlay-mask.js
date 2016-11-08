@@ -1,101 +1,5 @@
 (function() {
 
-  // Leaflet.TileOverlay
-  // SVG based implementation of Leaflet.TileLayer
-
-  L.TileOverlay = L.Layer.extend({
-    options: {
-      pane: "overlayPane",
-      attribution: null
-    },
-    initialize: function(url, options) {
-      this._url = url;
-      L.setOptions(this, options);
-    },
-    onAdd: function(map) {
-      var svg = map.getRenderer(this);
-      this._defs = svg._rootGroup.appendChild(L.SVG.create("defs"));
-      this._group = svg._rootGroup.appendChild(L.SVG.create("g"));
-    },
-    onRemove: function(map) {
-      this._group.parentNode.removeChild(this._group);
-      this._defs.parentNode.removeChild(this._defs);
-      delete this._group;
-      delete this._defs;
-    },
-    getEvents: function() {
-      return {
-        zoomend: this._update,
-        moveend: this._update,
-        viewreset: this._update
-      };
-    },
-    setUrl: function(url) {
-      this._url = url;
-      this._update();
-    },
-    getAttribution: function() {
-      return this.options.attribution;
-    },
-    getTileUrl: function(coords) {
-      return L.Util.template(this._url, L.extend(coords, this.options));
-    },
-    _createTile: function(coords) {
-      var image = L.SVG.create("image");
-      image.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", this.getTileUrl(coords));
-      this._project(image, coords);
-      return image;
-    },
-    _project: function(image, coords) {
-      var map = this._map;
-      var nw = map.unproject(coords.multiplyBy(256), coords.z);
-      var se = map.unproject(coords.add([1, 1]).multiplyBy(256), coords.z);
-      var box = L.bounds(map.latLngToLayerPoint(nw), map.latLngToLayerPoint(se));
-      image.setAttribute("x", box.min.x);
-      image.setAttribute("y", box.min.y);
-      image.setAttribute("width", box.getSize().x);
-      image.setAttribute("height", box.getSize().y);
-    },
-    _update: function() {
-      var map = this._map;
-      var opt = this.options;
-      var g = this._group;
-
-      var zoom = map.getZoom();
-      if ((opt.minZoom && opt.minZoom > zoom) || (opt.maxZoom && opt.maxZoom < zoom))
-        return;
-      if (opt.maxNativeZoom)
-        zoom = Math.min(opt.maxNativeZoom, zoom);
-
-      var images = {};
-      for (var f = g.firstChild; f; f = f.nextSibling)
-        if (f.getAttribute)
-          images[f.getAttribute("xlink:href")] = f;
-
-      var b = map.getBounds();
-      var tl = map.project(b.getNorthWest(), zoom).divideBy(256).floor();
-      var br = map.project(b.getSouthEast(), zoom).divideBy(256).ceil();
-      for (var y = tl.y; y < br.y; y++) {
-        for (var x = tl.x; x < br.x; x++) {
-          var coords = L.point(x, y);
-          coords.z = zoom;
-          var url = this.getTileUrl(coords);
-          if (images[url]) {
-            this._project(images[url], coords);
-            delete images[url];
-          } else {
-            g.appendChild(this._createTile(coords));
-          }
-        }
-      }
-      for (var f in images)
-        g.removeChild(images[f]);
-    }
-  });
-
-  // Default mask image
-  // 512 x 512 circle with soft edge
-
   var defaultMaskUrl = [
     'data:image/png;base64,',
     'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAC7lBMVEUAAAABAQECAgIDAwMEBAQF',
@@ -126,50 +30,108 @@
     'zI6ZgxlZuIRlVbW11eXFeFhxZHAmZlY2dlYWlPwPAD6nKPWk11d/AAAAAElFTkSuQmCC'
   ].join("");
 
-  // Leaflet.TileOverlay.Mask
-  // SVG based implementation of Leaflet.TileLayer with Mask Effect
 
+  // Leaflet.SVG.Mask
+  // SVG renderer with mask effect
 
-  L.TileOverlay.Mask = L.TileOverlay.extend({
+  L.SVG.Mask = L.SVG.extend({
     options: {
-      pane: "overlayPane",
       maskUrl: defaultMaskUrl,
       maskWidth: 512,
       maskHeight: 512
     },
-    onAdd: function(map) {
-      L.TileOverlay.prototype.onAdd.call(this, map);
-      var key = "_leaflet_tileroverlay_mask_" + L.stamp(this);
-      var opt = this.options;
-
-      var mask = this._defs.appendChild(L.SVG.create("mask"));
-      mask.setAttribute("id", key);
-      var image = mask.appendChild(L.SVG.create("image"));
-      image.setAttribute("width", opt.maskWidth);
-      image.setAttribute("height", opt.maskHeight);
-      image.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", opt.maskUrl);
-      this._group.setAttribute("mask", "url(#" + key + ")");
-      this._image = image;
-      this.setCenter(map.latLngToContainerPoint(map.getCenter()));
+    onAdd: function() {
+      L.SVG.prototype.onAdd.call(this);
+      this.setCenter(this._map.getSize().divideBy(2));
     },
-    onRemove: function(map) {
-      L.TileOverlay.prototype.onRemove.call(this, map);
-      delete this._image;
+    _initContainer: function() {
+      L.SVG.prototype._initContainer.call(this);
+      var defs = L.SVG.create("defs");
+      var mask = defs.appendChild(L.SVG.create("mask"));
+      var image = mask.appendChild(L.SVG.create("image"));
+      mask.setAttribute("id", "leaflet-svg-mask-" + L.stamp(this));
+      image.setAttribute("width", this.options.maskWidth);
+      image.setAttribute("height", this.options.maskHeight);
+      image.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", this.options.maskUrl);
+      this._rootGroup.setAttribute("mask", "url(#" + mask.getAttribute("id") + ")");
+      this._image = image;
+      this._container.insertBefore(defs, this._rootGroup);
     },
     setCenter: function(containerPoint) {
-      var layerPoint = this._map.containerPointToLayerPoint(containerPoint);
-      this._image.setAttribute("x", layerPoint.x - this.options.maskWidth / 2);
-      this._image.setAttribute("y", layerPoint.y - this.options.maskHeight / 2);
+      if (this._map) {
+        var layerPoint = this._map.containerPointToLayerPoint(containerPoint);
+        this._image.setAttribute("x", layerPoint.x - this.options.maskWidth / 2);
+        this._image.setAttribute("y", layerPoint.y - this.options.maskHeight / 2);
+      }
     }
   });
 
+  L.svg.mask = function(options) {
+    return new L.SVG.Mask(options);
+  };
+
+  // Leaflet.TileOverlay
+  // SVG based implementation of Leaflet.TileLayer
+
+  L.TileOverlay = L.TileLayer.extend({
+    options: {
+      pane: "overlayPane"
+    },
+    _initContainer: function() {
+      if (!this._container)
+        this._container = this._map.getRenderer(this)._rootGroup.appendChild(L.SVG.create("g"));
+    },
+    _updateLevels: function() {
+
+      var zoom = this._tileZoom;
+      if (zoom === undefined)
+        return undefined;
+
+      for (var z in this._levels) {
+        if (!this._levels[z].el.firstChild && z !== zoom) {
+          L.DomUtil.remove(this._levels[z].el);
+          this._removeTilesAtZoom(z);
+          delete this._levels[z];
+        }
+      }
+
+      var level = this._levels[zoom];
+      if (!level) {
+        var map = this._map;
+        level = {
+          el: this._container.appendChild(L.SVG.create("g")),
+          origin: map.project(map.unproject(map.getPixelOrigin()), zoom).round(),
+          zoom: zoom
+        };
+        this._setZoomTransform(level, map.getCenter(), map.getZoom());
+        this._levels[zoom] = level;
+      }
+      this._level = level;
+      return level;
+    },
+    _addTile: function(coords, container) {
+      var tilePos = this._getTilePos(coords);
+      var tileSize = this.getTileSize();
+      var key = this._tileCoordsToKey(coords);
+      var url = this.getTileUrl(this._wrapCoords(coords));
+
+      var tile = container.appendChild(L.SVG.create("image"));
+      tile.setAttribute("width", tileSize.x);
+      tile.setAttribute("height", tileSize.y);
+      tile.setAttribute("x", tilePos.x);
+      tile.setAttribute("y", tilePos.y);
+      tile.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", url);
+
+      this._tiles[key] = {
+        el: tile,
+        coords: coords,
+        current: true
+      };
+    }
+  });
 
   L.tileOverlay = function(url, options) {
     return new L.TileOverlay(url, options);
-  };
-
-  L.tileOverlay.mask = function(url, options) {
-    return new L.TileOverlay.Mask(url, options);
   };
 
 })();

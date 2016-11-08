@@ -30,30 +30,32 @@
 <body>
   <div id="map"></div>
   <script>
-    var bg = L.tileLayer("http://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg", {
+    var map = L.map("map", L.extend({
+      zoom: 15,
+      center: [35.6707, 139.7852]
+    }, L.Hash.parseHash(location.hash)));
+
+    L.hash(map);
+
+    L.tileLayer("http://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg", {
       attribution: "<a href='http://maps.gsi.go.jp/development/ichiran.html#ort'>写真(地理院タイル)</a>",
       minZoom: 2,
       maxZoom: 20,
       maxNativeZoom: 18
-    });
-    var fg = L.tileOverlay.mask("http://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", {
+    }).addTo(map);
+
+    var mask = L.svg.mask();
+    L.tileOverlay("http://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", {
       attribution: "<a href='http://maps.gsi.go.jp/development/ichiran.html#std'>標準地図(地理院タイル)</a>",
       minZoom: 2,
       maxZoom: 20,
-      maxNativeZoom: 18
-    });
-
-    var map = L.map("map", {
-      zoom: 15,
-      center: [35.6707, 139.7852],
-      layers: [bg, fg]
-    });
+      maxNativeZoom: 18,
+      renderer: mask
+    }).addTo(map);
 
     map.on("mousemove", function(event) {
-      fg.setCenter(event.containerPoint);
+      mask.setCenter(event.containerPoint);
     });
-
-    L.hash(map);
   </script>
 </body>
 
